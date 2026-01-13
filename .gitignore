@@ -24,8 +24,6 @@ wheels/
 *.egg
 
 # Models and data
-models/
-*.pkl
 *.pth
 *.bin
 data/training_data.json
