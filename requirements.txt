@@ -1,0 +1,16 @@
+# Core ML libraries
+sentence-transformers
+torch
+numpy
+scikit-learn
+pandas
+python-dotenv==1.0.0
+tqdm==4.66.1
+
+# API
+fastapi==0.109.0
+uvicorn==0.27.0
+
+# Future DB support (commented out for now)
+# psycopg2-binary==2.9.9
+# sqlalchemy==2.0.25

@@ -1,0 +1,58 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.pyc
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# Models and data (уже есть в контейнере)
+models/
+*.pkl
+*.pth
+*.bin
+data/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Environment
+.env
+.env.local
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
+.gitignore
+
+# Docker
+.dockerignore
+
+# Tests
+test_*.py
+tests/
+
+# Documentation
+*.md
+!README.md
+
+# Other
+.pytest_cache/
+.coverage
+htmlcov/
