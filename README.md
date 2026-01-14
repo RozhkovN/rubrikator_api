@@ -42,6 +42,33 @@ pip install -r requirements.txt
 
 ## Использование
 
+### Docker (рекомендуется)
+
+```bash
+# 1. Запустить контейнеры
+docker-compose up -d
+
+# 2. Обучить модель через API
+curl -X POST "http://localhost:8800/train" \
+  -H "Content-Type: application/json" \
+  -d '{}'
+
+# 3. Классифицировать жалобу
+curl -X POST "http://localhost:8800/classify" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "Банк заблокировал мою карту без предупреждения",
+    "top_k": 1
+  }'
+
+# 4. Открыть Swagger UI
+open http://localhost:8800/docs
+```
+
+Подробнее: [TRAINING.md](TRAINING.md)
+
+### Локальная разработка
+
 ### 1. Генерация обучающих данных
 ```bash
 python scripts/generate_data.py
@@ -68,7 +95,9 @@ python scripts/predict.py "Текст жалобы"
 - [x] Базовая архитектура
 - [x] Sentence Transformers классификация
 - [x] Анализ ключевых слов
-- [ ] REST API (FastAPI)
+- [x] REST API (FastAPI)
+- [x] Docker контейнеризация
+- [x] Веб-интерфейс
+- [x] API эндпоинт для обучения модели
 - [ ] База данных (PostgreSQL)
-- [ ] Веб-интерфейс
 - [ ] Continuous learning

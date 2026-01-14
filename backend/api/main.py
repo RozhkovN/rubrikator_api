@@ -81,6 +81,32 @@ class HealthResponse(BaseModel):
     model_loaded: bool
 
 
+class TrainRequest(BaseModel):
+    """Запрос на обучение модели"""
+    model_name: str = Field(
+        "paraphrase-multilingual-mpnet-base-v2",
+        description="Название модели Sentence Transformers"
+    )
+    use_keywords: bool = Field(True, description="Использовать ли анализ ключевых слов")
+    keyword_weight: float = Field(0.3, description="Вес ключевых слов (0-1)", ge=0, le=1)
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "model_name": "paraphrase-multilingual-mpnet-base-v2",
+                "use_keywords": True,
+                "keyword_weight": 0.3
+            }
+        }
+
+
+class TrainResponse(BaseModel):
+    """Ответ на запрос обучения"""
+    status: str
+    message: str
+    model_path: str
+
+
 # События жизненного цикла
 @app.on_event("startup")
 async def startup_event():
@@ -90,20 +116,21 @@ async def startup_event():
     logger.info("🚀 Запуск API сервера...")
     
     try:
-        classifier = ComplaintClassifier()
         model_path = root_dir / "models" / "classifier.pkl"
         
         if not model_path.exists():
-            logger.error(f"❌ Модель не найдена: {model_path}")
-            logger.error("Запустите сначала: python scripts/train.py")
-            raise FileNotFoundError(f"Модель не найдена: {model_path}")
-        
-        classifier.load(str(model_path))
-        logger.info("✅ Классификатор загружен успешно")
+            logger.warning(f"⚠️  Модель не найдена: {model_path}")
+            logger.warning("Используйте POST /train для обучения модели")
+            classifier = None
+        else:
+            classifier = ComplaintClassifier()
+            classifier.load(str(model_path))
+            logger.info("✅ Классификатор загружен успешно")
         
     except Exception as e:
         logger.error(f"❌ Ошибка загрузки модели: {e}")
-        raise
+        logger.warning("API запущен без модели. Используйте POST /train для обучения")
+        classifier = None
 
 
 @app.on_event("shutdown")
@@ -229,6 +256,84 @@ async def classify_batch(complaints: List[str]):
             status_code=500,
             detail=f"Ошибка при классификации: {str(e)}"
         )
+
+
+@app.post("/train", response_model=TrainResponse, tags=["Model Management"])
+async def train_model(request: TrainRequest):
+    """
+    Обучение (подготовка) модели классификатора.
+    
+    Создает векторные представления рубрикаторов и сохраняет модель.
+    После обучения модель автоматически загружается в memory.
+    
+    - **model_name**: Название модели Sentence Transformers
+    - **use_keywords**: Использовать ли анализ ключевых слов
+    - **keyword_weight**: Вес ключевых слов (0-1)
+    
+    Примечание: Процесс может занять несколько минут при первом запуске
+    (загрузка модели из интернета).
+    """
+    global classifier
+    
+    try:
+        logger.info("🚀 Начинаем обучение модели...")
+        logger.info(f"   Модель: {request.model_name}")
+        logger.info(f"   Ключевые слова: {request.use_keywords}")
+        logger.info(f"   Вес ключевых слов: {request.keyword_weight}")
+        
+        # Создаем новый классификатор с заданными параметрами
+        new_classifier = ComplaintClassifier(
+            model_name=request.model_name,
+            use_keywords=request.use_keywords,
+            keyword_weight=request.keyword_weight
+        )
+        
+        # Путь для сохранения модели
+        model_path = root_dir / "models" / "classifier.pkl"
+        
+        # Обучаем (создаем эмбеддинги)
+        new_classifier.train(save_path=str(model_path))
+        
+        # Заменяем глобальный классификатор на новый
+        classifier = new_classifier
+        
+        logger.info("✅ Обучение завершено успешно")
+        
+        return TrainResponse(
+            status="success",
+            message="Модель успешно обучена и загружена",
+            model_path=str(model_path)
+        )
+        
+    except Exception as e:
+        logger.error(f"❌ Ошибка обучения модели: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Ошибка при обучении модели: {str(e)}"
+        )
+
+
+@app.get("/model/info", tags=["Model Management"])
+async def get_model_info():
+    """
+    Получение информации о текущей загруженной модели.
+    
+    Возвращает параметры и статус модели.
+    """
+    if classifier is None:
+        return {
+            "loaded": False,
+            "message": "Модель не загружена"
+        }
+    
+    return {
+        "loaded": True,
+        "model_name": classifier.model_name,
+        "use_keywords": classifier.use_keywords,
+        "keyword_weight": classifier.keyword_weight,
+        "semantic_weight": classifier.semantic_weight,
+        "rubrics_count": len(classifier.rubrics)
+    }
 
 
 if __name__ == "__main__":
