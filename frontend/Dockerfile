@@ -4,7 +4,7 @@ FROM node:20-alpine AS builder
 WORKDIR /app
 
 # Принимаем переменные окружения как build arguments
-ARG VITE_API_URL=http://localhost:8800/
+ARG VITE_API_URL=http://80.253.19.93:8800/
 
 # Экспортируем как переменные окружения для vite
 ENV VITE_API_URL=$VITE_API_URL
@@ -17,6 +17,9 @@ RUN npm ci || npm install
 
 # Копируем остальные файлы
 COPY . .
+
+# Даем права на выполнение для node_modules/.bin
+RUN chmod -R +x node_modules/.bin 2>/dev/null || true
 
 # Собираем проект
 RUN npm run build
