@@ -1,73 +1,78 @@
-# React + TypeScript + Vite
+<div align="center">
+  <h1>Анализатор Жалоб — Рубрикатор (Клиент)</h1>
+  <p>
+	 Веб-интерфейс для системы автоматической классификации жалоб по 20 рубрикаторам с использованием ML
+  </p>
+</div>
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+---
 
-Currently, two official plugins are available:
+## 📝 Описание проекта
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+Rubricator — это система автоматической классификации жалоб по 20 рубрикаторам с использованием гибридных ML-методов. Данный репозиторий содержит клиентскую часть (frontend) для взаимодействия с ML-бэкендом, визуализации результатов и тестирования моделей.
 
-## React Compiler
+---
 
-The React Compiler is currently not compatible with SWC. See [this issue](https://github.com/vitejs/vite-plugin-react/issues/428) for tracking the progress.
+## 🏗️ Архитектура
 
-## Expanding the ESLint configuration
+Гибридный подход:
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+- Sentence Transformers (paraphrase-multilingual-mpnet-base-v2) для семантического анализа
+- Анализ ключевых слов для уточнения категории
+- Взвешенная комбинация методов для максимальной точности
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+Клиент:
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+- Взаимодействие с ML-бэкендом через REST API
+- Визуализация рубрик и результатов классификации
+- Удобный интерфейс для анализа и тестирования
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+---
+
+## 🚀 Быстрый старт
+
+1. **Клонируйте репозиторий:**
+   ```bash
+   git clone https://github.com/your-username/rubricator-client.git
+   cd rubricator-client
+   ```
+2. **Установите зависимости:**
+   ```bash
+   npm install
+   # или
+   yarn install
+   ```
+3. **Запустите проект в режиме разработки:**
+   ```bash
+   npm run dev
+   # или
+   yarn dev
+   ```
+
+---
+
+## 🐳 Запуск через Docker
+
+1. **Соберите и запустите контейнер:**
+   ```bash
+   docker build -t rubricator-client .
+   docker run -d -p 3800:3800 rubricator-client
+   ```
+2. Откройте [http://localhost:3800](http://localhost:3800) в браузере.
+
+**Изменение API URL:**
+Можно указать адрес бэкенда при сборке:
+```bash
+docker build --build-arg VITE_API_URL=http://your-backend:8800 -t rubricator-client .
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+## 🛠️ Технологии
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+- [React](https://react.dev/)
+- [Vite](https://vitejs.dev/)
+- [TypeScript](https://www.typescriptlang.org/)
+- [Tailwind CSS](https://tailwindcss.com/)
+- [Axios](https://axios-http.com/)
+- [Framer Motion](https://www.framer.com/motion/)
+- [Lucide React](https://lucide.dev/)
+- [ESLint](https://eslint.org/)
