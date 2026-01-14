@@ -1,18 +1,25 @@
 # Этап сборки
-FROM oven/bun:latest AS builder
+FROM node:20-alpine AS builder
 
 WORKDIR /app
 
 # Принимаем переменные окружения как build arguments
 ARG VITE_API_URL=http://localhost:8800/
 
-# Экспортируем как переменные окружения для bun
+# Экспортируем как переменные окружения для vite
 ENV VITE_API_URL=$VITE_API_URL
 
+# Копируем package файлы
+COPY package.json package-lock.json* bun.lock* ./
+
+# Устанавливаем зависимости
+RUN npm ci || npm install
+
+# Копируем остальные файлы
 COPY . .
 
-RUN bun install --frozen-lockfile
-RUN bun run build
+# Собираем проект
+RUN npm run build
 
 # Этап деплоя с nginx
 FROM nginx:alpine
