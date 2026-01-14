@@ -15,14 +15,13 @@ COPY package.json package-lock.json* bun.lock* ./
 # Устанавливаем зависимости
 RUN npm ci || npm install
 
-# Копируем остальные файлы
-COPY . .
+# Копируем остальные файлы (исключая node_modules)
+COPY tsconfig*.json vite.config.ts index.html ./
+COPY public ./public
+COPY src ./src
 
-# Даем права на выполнение для node_modules/.bin
-RUN chmod -R +x node_modules/.bin 2>/dev/null || true
-
-# Собираем проект
-RUN npm run build
+# Собираем проект с использованием npx
+RUN npx tsc -b && npx vite build
 
 # Этап деплоя с nginx
 FROM nginx:alpine
