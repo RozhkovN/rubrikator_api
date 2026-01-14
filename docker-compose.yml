@@ -36,7 +36,7 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
       args:
-        VITE_API_URL: http://localhost:8800/
+        VITE_API_URL: http://80.253.19.93:8800/
     container_name: rubrikator-frontend
     ports:
       - "3800:3800"
