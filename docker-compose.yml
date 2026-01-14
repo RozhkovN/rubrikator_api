@@ -1,21 +1,22 @@
 version: '3.8'
 
 services:
-  rubrikator-api:
+  # Backend API
+  backend:
     build:
-      context: .
+      context: ./backend
       dockerfile: Dockerfile
-    container_name: rubrikator-api
+    container_name: rubrikator-backend
     ports:
       - "8800:8800"
     volumes:
       # Монтируем модели, чтобы не пересоздавать при каждом запуске
-      - ./models:/app/models
-      - ./data:/app/data
+      - ./backend/models:/app/models
+      - ./backend/data:/app/data
       # Для разработки можно раскомментировать, чтобы изменения применялись сразу
-      # - ./api:/app/api
-      # - ./src:/app/src
-      # - ./config:/app/config
+      # - ./backend/api:/app/api
+      # - ./backend/src:/app/src
+      # - ./backend/config:/app/config
     environment:
       - PORT=8800
       - PYTHONUNBUFFERED=1
@@ -26,6 +27,22 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
+    networks:
+      - rubrikator-network
+
+  # Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: http://localhost:8800/
+    container_name: rubrikator-frontend
+    ports:
+      - "3800:3800"
+    depends_on:
+      - backend
+    restart: unless-stopped
     networks:
       - rubrikator-network
 
