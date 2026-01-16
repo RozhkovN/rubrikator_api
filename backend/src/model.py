@@ -16,6 +16,7 @@ from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 
 from config.rubrics import RUBRICS, get_rubric_by_id
+from config.response_templates import get_response_template
 from src.preprocessor import (
     normalize_text, 
     calculate_keyword_score,
@@ -378,10 +379,12 @@ class ComplaintClassifier:
         predictions = []
         for idx in top_indices:
             rubric = self.rubrics[idx]
+            rubric_id = rubric['id']
             predictions.append({
-                'rubric_id': rubric['id'],
+                'rubric_id': rubric_id,
                 'rubric_name': rubric['description'],  # Используем полное описание
                 'short_name': rubric['name'],  # Краткое название для справки
+                'response_template': get_response_template(rubric_id),  # Шаблон ответа
                 'confidence': float(final_scores[idx]),
                 'semantic_score': float(semantic_scores[idx]) if return_scores else None,
                 'keyword_score': float(keyword_scores[idx]) if return_scores else None

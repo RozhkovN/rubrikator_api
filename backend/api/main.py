@@ -65,6 +65,7 @@ class PredictionItem(BaseModel):
     rubric_id: int
     rubric_name: str
     short_name: str
+    response_template: str
     confidence: float
 
 
@@ -194,6 +195,7 @@ async def classify_complaint(request: ComplaintRequest):
                 rubric_id=pred['rubric_id'],
                 rubric_name=pred['rubric_name'],
                 short_name=pred.get('short_name', ''),
+                response_template=pred.get('response_template', ''),
                 confidence=round(pred['confidence'], 4)
             ))
         
@@ -245,6 +247,7 @@ async def classify_batch(complaints: List[str]):
                 "rubric_id": pred['rubric_id'],
                 "rubric_name": pred['rubric_name'],
                 "short_name": pred.get('short_name', ''),
+                "response_template": pred.get('response_template', ''),
                 "confidence": round(pred['confidence'], 4)
             })
         
