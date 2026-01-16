@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, type ChangeEvent } from "react";
 import { m, AnimatePresence, LazyMotion, domAnimation } from "framer-motion";
 import axios from "axios";
 import {
@@ -12,12 +12,19 @@ import {
   BarChart3,
   ChevronDown,
   ChevronUp,
+  Upload,
+  X,
+  File,
+  MessageSquare,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 
 interface Rubric {
   rubric_id: number;
   rubric_name: string;
   short_name: string;
+  response_template: string;
   confidence: number;
 }
 
@@ -25,6 +32,24 @@ interface APIResponse {
   text: string;
   best_match: Rubric;
   all_predictions: Rubric[] | null;
+}
+
+interface FileResult {
+  filename: string;
+  text: string;
+  rubric_id: number;
+  rubric_name: string;
+  short_name: string;
+  response_template: string;
+  confidence: number;
+  error: string | null;
+}
+
+interface MultiFileResponse {
+  results: FileResult[];
+  total: number;
+  success: number;
+  failed: number;
 }
 
 type Message = {
@@ -35,6 +60,10 @@ type Message = {
   rubric?: Rubric;
   allRubrics?: Rubric[] | null;
   error?: string;
+  fileName?: string;
+  isFileMessage?: boolean;
+  fileResults?: FileResult[];
+  showTemplate?: boolean;
 };
 
 type ExpandedRubric = {
@@ -46,10 +75,13 @@ export default function App() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const [files, setFiles] = useState<File[]>([]);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [expandedRubrics, setExpandedRubrics] = useState<ExpandedRubric>({});
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Адаптация для мобильных устройств
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
@@ -76,6 +108,16 @@ export default function App() {
       ...prev,
       [rubricId]: !prev[rubricId],
     }));
+  };
+
+  const toggleTemplateVisibility = (messageId: string) => {
+    setMessages((prev) =>
+      prev.map((msg) =>
+        msg.id === messageId
+          ? { ...msg, showTemplate: !msg.showTemplate }
+          : msg,
+      ),
+    );
   };
 
   const copyToClipboard = async (text: string, messageId: string) => {
@@ -107,7 +149,7 @@ export default function App() {
 
   const formatResults = (
     rubric: Rubric | undefined,
-    allRubrics: Rubric[] | null
+    allRubrics: Rubric[] | null,
   ) => {
     if (!rubric) {
       return "Нет данных для отображения.";
@@ -115,10 +157,11 @@ export default function App() {
 
     let result = `Название: ${rubric.rubric_name}\n`;
     result += `Краткое название: ${rubric.short_name}\n`;
-    result += `Уверенность: ${(rubric.confidence * 100).toFixed(2)}%\n`;
+    result += `Уверенность: ${(rubric.confidence * 100).toFixed(2)}%\n\n`;
+    result += `Ответ:\n${rubric.response_template}`;
 
     if (allRubrics && allRubrics.length > 1) {
-      result += "\nВсе варианты:\n";
+      result += "\n\nВсе варианты:\n";
       allRubrics.forEach((r, index) => {
         result += `${index + 1}. ${r.short_name} (${(r.confidence * 100).toFixed(2)}%)\n`;
       });
@@ -127,30 +170,49 @@ export default function App() {
     return result;
   };
 
+  const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files) {
+      const selectedFiles = Array.from(e.target.files);
+      setFiles((prev) => [...prev, ...selectedFiles]);
+    }
+    e.target.value = "";
+  };
+
+  const removeFile = (index: number) => {
+    setFiles((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const handleUploadClick = () => {
+    fileInputRef.current?.click();
+  };
+
   const handleSendMessage = async () => {
     const text = inputValue.trim();
-    if (!text || isLoading) return;
+    const hasFiles = files.length > 0;
+
+    if ((!text && !hasFiles) || isLoading) return;
 
     const userMessageId = `user-${Date.now()}`;
     const loadingMessageId = `loading-${Date.now()}`;
 
-    // Добавляем сообщение пользователя с анимацией
     setMessages((prev) => [
       ...prev,
       {
         id: userMessageId,
-        text: text,
+        text: hasFiles ? `Файлы: ${files.map((f) => f.name).join(", ")}` : text,
         isUser: true,
         isLoading: false,
+        isFileMessage: hasFiles,
+        fileName: hasFiles ? files.map((f) => f.name).join(", ") : undefined,
       },
     ]);
 
-    // Очищаем поле ввода
     setInputValue("");
+    setFiles([]);
     setIsLoading(true);
-    setExpandedRubrics({}); // Сбрасываем раскрытые рубрики
+    setIsUploading(hasFiles);
+    setExpandedRubrics({});
 
-    // Добавляем сообщение загрузки
     setMessages((prev) => [
       ...prev,
       {
@@ -162,34 +224,99 @@ export default function App() {
     ]);
 
     try {
-      const response = await axios.post<APIResponse>(
-        `${API_URL}/classify`,
-        {
-          text: text,
-          top_k: 2,
-        },
-        {
-          headers: {
-            "Content-Type": "application/json",
-          },
-        }
-      );
+      if (hasFiles) {
+        const formData = new FormData();
 
-      // Задержка для плавной анимации
-      setTimeout(() => {
-        setMessages((prev) =>
-          prev.map((msg) =>
-            msg.id === loadingMessageId
-              ? {
-                  ...msg,
-                  isLoading: false,
-                  rubric: response.data.best_match,
-                  allRubrics: response.data.all_predictions,
-                }
-              : msg
-          )
+        if (files.length === 1) {
+          formData.append("file", files[0]);
+          const response = await axios.post<APIResponse>(
+            `${API_URL}/classify/file`,
+            formData,
+            {
+              headers: {
+                "Content-Type": "multipart/form-data",
+              },
+            },
+          );
+
+          setTimeout(() => {
+            setMessages((prev) =>
+              prev.map((msg) =>
+                msg.id === loadingMessageId
+                  ? {
+                      ...msg,
+                      isLoading: false,
+                      rubric: response.data.best_match,
+                      allRubrics: response.data.all_predictions,
+                      isFileMessage: true,
+                      fileName: files[0].name,
+                      showTemplate: true,
+                    }
+                  : msg,
+              ),
+            );
+          }, 500);
+        } else {
+          files.forEach((file) => {
+            formData.append(`files`, file);
+          });
+
+          const response = await axios.post<MultiFileResponse>(
+            `${API_URL}/classify/files`,
+            formData,
+            {
+              headers: {
+                "Content-Type": "multipart/form-data",
+              },
+            },
+          );
+
+          setTimeout(() => {
+            setMessages((prev) =>
+              prev.map((msg) =>
+                msg.id === loadingMessageId
+                  ? {
+                      ...msg,
+                      isLoading: false,
+                      isFileMessage: true,
+                      fileResults: response.data.results,
+                      showTemplate: true,
+                    }
+                  : msg,
+              ),
+            );
+          }, 500);
+        }
+      } else {
+        const response = await axios.post<APIResponse>(
+          `${API_URL}/classify`,
+          {
+            text: text,
+            top_k: 2,
+          },
+          {
+            headers: {
+              "Content-Type": "application/json",
+            },
+          },
         );
-      }, 500);
+
+        setTimeout(() => {
+          setMessages((prev) =>
+            prev.map((msg) =>
+              msg.id === loadingMessageId
+                ? {
+                    ...msg,
+                    isLoading: false,
+                    rubric: response.data.best_match,
+                    allRubrics: response.data.all_predictions,
+                    showTemplate: true,
+                  }
+                : msg,
+            ),
+          );
+        }, 500);
+      }
     } catch (error) {
       let errorMessage = "Неизвестная ошибка";
 
@@ -216,12 +343,13 @@ export default function App() {
                   isLoading: false,
                   error: errorMessage,
                 }
-              : msg
-          )
+              : msg,
+          ),
         );
       }, 500);
     } finally {
       setIsLoading(false);
+      setIsUploading(false);
     }
   };
 
@@ -231,6 +359,332 @@ export default function App() {
       handleSendMessage();
     }
   };
+
+  const formatTemplateText = (text: string) => {
+    return text
+      .split("\n")
+      .filter((line) => line.trim())
+      .map((line) => line.trim());
+  };
+
+  const renderRubricContent = (
+    rubric: Rubric,
+    allRubrics: Rubric[] | null,
+    messageId: string,
+  ) => (
+    <div className="space-y-5">
+      <div className="space-y-4">
+        <div className="space-y-2">
+          <div className="flex items-center gap-2 text-sm font-medium text-gray-500">
+            <FileText className="h-4 w-4" />
+            Наиболее подходящая рубрика
+          </div>
+          <div className="text-base font-semibold text-gray-800">
+            {rubric.short_name}
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <div className="text-sm font-medium text-gray-500">
+            Полное описание
+          </div>
+          <div className="text-sm text-gray-700 leading-relaxed p-3 bg-gray-50 rounded-lg">
+            {rubric.rubric_name}
+          </div>
+        </div>
+
+        {/* Шаблон ответа */}
+        <div className="border-t border-gray-100 pt-4">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <MessageSquare className="h-4 w-4 text-blue-600" />
+              <h4 className="text-sm font-medium text-gray-700">
+                Ответ
+              </h4>
+            </div>
+            <m.button
+              onClick={() => toggleTemplateVisibility(messageId)}
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              className="flex items-center gap-2 text-sm text-blue-600 hover:text-blue-700"
+            >
+              {messages.find((m) => m.id === messageId)?.showTemplate ? (
+                <>
+                  <EyeOff className="h-4 w-4" />
+                  Скрыть ответ
+                </>
+              ) : (
+                <>
+                  <Eye className="h-4 w-4" />
+                  Показать ответ
+                </>
+              )}
+            </m.button>
+          </div>
+
+          <AnimatePresence>
+            {messages.find((m) => m.id === messageId)?.showTemplate && (
+              <m.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: "auto" }}
+                exit={{ opacity: 0, height: 0 }}
+                transition={{ duration: 0.3 }}
+                className="overflow-hidden"
+              >
+                <div className="bg-blue-50 rounded-lg border border-blue-100 overflow-hidden">
+                  <div className="p-4 max-h-96 overflow-y-auto">
+                    <div className="space-y-3">
+                      {formatTemplateText(rubric.response_template).map(
+                        (paragraph, index) => (
+                          <m.p
+                            key={index}
+                            initial={{ opacity: 0, y: 5 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ delay: index * 0.05 }}
+                            className="text-sm text-gray-700 leading-relaxed"
+                          >
+                            {paragraph}
+                          </m.p>
+                        ),
+                      )}
+                    </div>
+                  </div>
+                  <div className="px-4 py-3 bg-blue-100 border-t border-blue-200">
+                    <div className="flex justify-between items-center text-xs text-blue-700">
+                      <div className="font-medium">
+                        Длина ответа: {rubric.response_template.length}{" "}
+                        символов
+                      </div>
+                      <m.button
+                        onClick={() =>
+                          copyToClipboard(rubric.response_template, messageId)
+                        }
+                        whileHover={{ scale: 1.05 }}
+                        whileTap={{ scale: 0.95 }}
+                        className="flex items-center gap-1 hover:text-blue-800"
+                      >
+                        <Copy className="h-3 w-3" />
+                        Копировать ответ
+                      </m.button>
+                    </div>
+                  </div>
+                </div>
+              </m.div>
+            )}
+          </AnimatePresence>
+        </div>
+      </div>
+
+      {allRubrics && allRubrics.length > 1 && (
+        <m.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.4 }}
+          className="border-t border-gray-100 pt-4"
+        >
+          <h4 className="mb-3 text-sm font-medium text-gray-700">
+            Дополнительные варианты
+          </h4>
+          <div className="space-y-2">
+            {allRubrics.slice(1).map((rubric, index) => (
+              <div key={rubric.rubric_id}>
+                <m.button
+                  onClick={() => toggleRubricExpansion(rubric.rubric_id)}
+                  className={`w-full flex items-center justify-between rounded-lg p-3 hover:bg-gray-50 transition-colors ${
+                    expandedRubrics[rubric.rubric_id]
+                      ? "bg-gray-50 border border-gray-200"
+                      : "bg-white border border-gray-100"
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-6 w-6 items-center justify-center rounded-full bg-gray-300 text-gray-600">
+                      <span className="text-xs font-bold">{index + 2}</span>
+                    </div>
+                    <div className="text-left">
+                      <span className="text-sm text-gray-700">
+                        {rubric.short_name}
+                      </span>
+                      <div className="text-sm text-gray-500">
+                        Уверенность: {(rubric.confidence * 100).toFixed(1)}%
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-gray-500">
+                      {expandedRubrics[rubric.rubric_id]
+                        ? "Скрыть"
+                        : "Показать"}
+                    </span>
+                    {expandedRubrics[rubric.rubric_id] ? (
+                      <ChevronUp className="h-4 w-4 text-gray-500" />
+                    ) : (
+                      <ChevronDown className="h-4 w-4 text-gray-500" />
+                    )}
+                  </div>
+                </m.button>
+                <AnimatePresence>
+                  {expandedRubrics[rubric.rubric_id] && (
+                    <m.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: "auto" }}
+                      exit={{ opacity: 0, height: 0 }}
+                      transition={{ duration: 0.2 }}
+                      className="overflow-hidden"
+                    >
+                      <div className="mt-2 p-4 bg-blue-50 rounded-lg border border-blue-100">
+                        <div className="space-y-3">
+                          <div className="text-sm font-medium text-blue-700">
+                            Полное название:
+                          </div>
+                          <div className="text-sm text-gray-700 leading-relaxed">
+                            {rubric.rubric_name}
+                          </div>
+                          <div className="pt-3 border-t border-blue-100">
+                            <div className="text-sm font-medium text-blue-700 mb-2">
+                              Ответ:
+                            </div>
+                            <div className="text-sm text-gray-700 leading-relaxed bg-white p-3 rounded border border-blue-100 max-h-40 overflow-y-auto">
+                              {rubric.response_template}
+                            </div>
+                          </div>
+                          <div className="flex items-center justify-between text-sm text-gray-500">
+                            <div>
+                              Уверенность:{" "}
+                              <span className="font-semibold">
+                                {(rubric.confidence * 100).toFixed(1)}%
+                              </span>
+                            </div>
+                            <m.button
+                              onClick={() =>
+                                copyToClipboard(
+                                  rubric.response_template,
+                                  messageId + "-" + rubric.rubric_id,
+                                )
+                              }
+                              whileHover={{ scale: 1.05 }}
+                              whileTap={{ scale: 0.95 }}
+                              className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700"
+                            >
+                              <Copy className="h-3 w-3" />
+                              Копировать
+                            </m.button>
+                          </div>
+                        </div>
+                      </div>
+                    </m.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            ))}
+          </div>
+        </m.div>
+      )}
+    </div>
+  );
+
+  const renderFileResults = (fileResults: FileResult[]) => (
+    <div className="space-y-4">
+      <div className="grid grid-cols-3 gap-2 mb-4 p-3 bg-gray-50 rounded-lg">
+        <div className="text-center">
+          <div className="text-lg font-bold text-blue-600">
+            {fileResults.length}
+          </div>
+          <div className="text-xs text-gray-600">Всего файлов</div>
+        </div>
+        <div className="text-center">
+          <div className="text-lg font-bold text-green-600">
+            {fileResults.filter((f) => !f.error).length}
+          </div>
+          <div className="text-xs text-gray-600">Успешно</div>
+        </div>
+        <div className="text-center">
+          <div className="text-lg font-bold text-red-600">
+            {fileResults.filter((f) => f.error).length}
+          </div>
+          <div className="text-xs text-gray-600">С ошибками</div>
+        </div>
+      </div>
+
+      {fileResults.map((result, fileIndex) => (
+        <m.div
+          key={fileIndex}
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: fileIndex * 0.1 }}
+          className="border border-gray-200 rounded-lg overflow-hidden"
+        >
+          <div className="bg-gray-50 p-3 border-b border-gray-200">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <File className="h-4 w-4 text-blue-600" />
+                <div className="font-medium text-gray-700 truncate">
+                  {result.filename}
+                </div>
+              </div>
+              <div className="flex items-center gap-2 px-2 py-1 rounded-full bg-blue-50">
+                <BarChart3 className="h-3 w-3 text-blue-600" />
+                <span className="text-xs font-bold text-blue-700">
+                  {(result.confidence * 100).toFixed(1)}%
+                </span>
+              </div>
+            </div>
+            {result.text && (
+              <div className="mt-2 text-sm text-gray-600 italic">
+                "{result.text}"
+              </div>
+            )}
+          </div>
+
+          <div className="p-4">
+            {result.error ? (
+              <div className="text-sm text-red-500 bg-red-50 p-3 rounded">
+                Ошибка: {result.error}
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <div>
+                  <div className="text-sm font-medium text-gray-500 mb-1">
+                    Рубрика:
+                  </div>
+                  <div className="text-sm font-semibold text-gray-800">
+                    {result.short_name}
+                  </div>
+                </div>
+
+                <div className="border-t border-gray-100 pt-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <MessageSquare className="h-4 w-4 text-blue-600" />
+                      <div className="text-sm font-medium text-gray-700">
+                        Ответ
+                      </div>
+                    </div>
+                    <m.button
+                      onClick={() =>
+                        copyToClipboard(
+                          result.response_template,
+                          `file-${fileIndex}`,
+                        )
+                      }
+                      whileHover={{ scale: 1.05 }}
+                      whileTap={{ scale: 0.95 }}
+                      className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700"
+                    >
+                      <Copy className="h-3 w-3" />
+                      Копировать
+                    </m.button>
+                  </div>
+                  <div className="text-sm text-gray-700 leading-relaxed bg-blue-50 p-3 rounded border border-blue-100 max-h-32 overflow-y-auto">
+                    {result.response_template}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </m.div>
+      ))}
+    </div>
+  );
 
   return (
     <LazyMotion features={domAnimation}>
@@ -268,10 +722,10 @@ export default function App() {
 
                 <div className="w-full p-3 rounded-lg bg-white/10 backdrop-blur-sm">
                   <div className="text-white text-sm font-medium mb-1">
-                    Сообщений
+                    Файлов
                   </div>
                   <div className="text-white text-2xl font-bold">
-                    {messages.length}
+                    {messages.filter((m) => m.isFileMessage).length}
                   </div>
                 </div>
               </div>
@@ -279,9 +733,7 @@ export default function App() {
           </m.div>
         )}
 
-        {/* Основное содержимое */}
         <div className="flex flex-1 flex-col">
-          {/* Заголовок */}
           <m.header
             initial={{ y: -50, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
@@ -307,13 +759,15 @@ export default function App() {
                     <h1 className="text-2xl font-bold text-gray-800 sm:text-3xl">
                       Рубрикатор обращений
                     </h1>
+                    <p className="text-center text-sm text-gray-500 mt-1">
+                      Автоматическая классификация
+                    </p>
                   </div>
                 </div>
               </div>
             </div>
           </m.header>
 
-          {/* Основной чат */}
           <main className="flex flex-1 flex-col overflow-hidden">
             <div className="flex-1 overflow-y-auto p-4 sm:p-6">
               <div className="mx-auto max-w-4xl">
@@ -357,9 +811,8 @@ export default function App() {
                         transition={{ delay: 0.4 }}
                         className="max-w-md text-md text-gray-600 mb-6"
                       >
-                        Введите текст обращения в поле ниже
-                        <br /> Система автоматически определит наиболее
-                        подходящую рубрику для вашего запроса
+                        Введите текст или загрузите файлы для классификации
+                        <br /> Получите рубрику и готовый ответ
                       </m.p>
                       <m.div
                         initial={{ opacity: 0, y: 20 }}
@@ -401,8 +854,14 @@ export default function App() {
                                 <div className="order-2">
                                   <div className="rounded-xl rounded-br-none bg-blue-600 p-4 text-white shadow-md">
                                     <div className="flex items-center gap-2 mb-2">
-                                      <User className="h-6 w-4 text-white/90" />
-                                      <p className="text-lg font-medium">Вы</p>
+                                      {message.isFileMessage ? (
+                                        <Upload className="h-4 w-4 text-white/90" />
+                                      ) : (
+                                        <User className="h-4 w-4 text-white/90" />
+                                      )}
+                                      <p className="text-lg font-medium">
+                                        {message.isFileMessage ? "Файлы" : "Вы"}
+                                      </p>
                                     </div>
                                     <p className="text-lg text-white/95">
                                       {message.text}
@@ -411,7 +870,11 @@ export default function App() {
                                 </div>
                                 <div className="order-1">
                                   <div className="flex h-10 w-10 items-center justify-center rounded-full bg-blue-700 shadow-sm">
-                                    <User className="h-6 w-6 text-white" />
+                                    {message.isFileMessage ? (
+                                      <Upload className="h-5 w-5 text-white" />
+                                    ) : (
+                                      <User className="h-5 w-5 text-white" />
+                                    )}
                                   </div>
                                 </div>
                               </div>
@@ -433,7 +896,9 @@ export default function App() {
                                     className="h-4 w-4 rounded-full border-2 border-blue-600 border-t-transparent"
                                   />
                                   <p className="text-sm font-medium text-gray-700">
-                                    Анализ обращения...
+                                    {isUploading
+                                      ? "Анализ файлов..."
+                                      : "Анализ обращения..."}
                                   </p>
                                 </div>
                                 <div className="mt-2 h-1 w-48 bg-gray-200 rounded-full overflow-hidden">
@@ -475,7 +940,7 @@ export default function App() {
                                 className="flex items-start gap-3"
                               >
                                 <div className="flex h-10 w-10 items-center justify-center rounded-full bg-linear-to-r from-blue-600 to-blue-700 shadow-sm">
-                                  <Bot className="h-6 w-6 text-white" />
+                                  <Bot className="h-5 w-5 text-white" />
                                 </div>
                                 <div className="flex-1">
                                   <m.div
@@ -484,205 +949,68 @@ export default function App() {
                                   >
                                     <div className="flex items-center justify-between mb-4 pb-3 border-b border-gray-100">
                                       <h3 className="text-2xl font-bold text-gray-800">
-                                        Результат классификации
+                                        {message.isFileMessage
+                                          ? "Результаты анализа файлов"
+                                          : "Результат классификации"}
                                       </h3>
-                                      <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-blue-50">
-                                        <BarChart3 className="h-4 w-4 text-blue-600" />
-                                        <span className="text-md font-bold text-blue-700">
-                                          {message.rubric &&
-                                            (
+                                      {message.rubric && (
+                                        <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-blue-50">
+                                          <BarChart3 className="h-4 w-4 text-blue-600" />
+                                          <span className="text-md font-bold text-blue-700">
+                                            {(
                                               message.rubric.confidence * 100
                                             ).toFixed(1)}
-                                          %
-                                        </span>
-                                      </div>
+                                            %
+                                          </span>
+                                        </div>
+                                      )}
                                     </div>
 
-                                    {message.rubric && (
-                                      <div className="space-y-5">
-                                        {/* Основная информация */}
-                                        <div className="space-y-4">
-                                          <div className="space-y-2">
-                                            <div className="flex items-center gap-2 text-sm font-medium text-gray-500">
-                                              <FileText className="h-4 w-4" />
-                                              Наиболее подходящая рубрика
-                                            </div>
-                                            <div className="text-base font-semibold text-gray-800">
-                                              {message.rubric.short_name}
-                                            </div>
-                                          </div>
-
-                                          {/* Полное название основной рубрики */}
-                                          <div className="space-y-2">
-                                            <div className="text-sm font-medium text-gray-500">
-                                              Полное описание
-                                            </div>
-                                            <div className="text-md text-gray-700 leading-relaxed p-3 bg-gray-50 rounded-lg">
-                                              {message.rubric.rubric_name}
-                                            </div>
-                                          </div>
-                                        </div>
-
-                                        {/* Все варианты */}
-                                        {message.allRubrics &&
-                                          message.allRubrics.length > 1 && (
-                                            <m.div
-                                              initial={{ opacity: 0 }}
-                                              animate={{ opacity: 1 }}
-                                              transition={{ delay: 0.4 }}
-                                              className="border-t border-gray-100 pt-4"
-                                            >
-                                              <h4 className="mb-3 text-sm font-medium text-gray-700">
-                                                Дополнительные варианты
-                                              </h4>
-                                              <div className="space-y-2">
-                                                {message.allRubrics
-                                                  .slice(1) // Пропускаем первый элемент (он уже основной)
-                                                  .map((rubric, index) => (
-                                                    <div key={rubric.rubric_id}>
-                                                      <m.button
-                                                        onClick={() =>
-                                                          toggleRubricExpansion(
-                                                            rubric.rubric_id
-                                                          )
-                                                        }
-                                                        className={`w-full flex items-center justify-between rounded-lg p-3 hover:bg-gray-50 transition-colors ${
-                                                          expandedRubrics[
-                                                            rubric.rubric_id
-                                                          ]
-                                                            ? "bg-gray-50 border border-gray-200"
-                                                            : "bg-white border border-gray-100"
-                                                        }`}
-                                                      >
-                                                        <div className="flex items-center gap-3">
-                                                          <div className="flex h-6 w-6 items-center justify-center rounded-full bg-gray-300 text-gray-600">
-                                                            <span className="text-xs font-bold">
-                                                              {index + 2}
-                                                            </span>
-                                                          </div>
-                                                          <div className="text-left">
-                                                            <span className="text-sm text-gray-700">
-                                                              {
-                                                                rubric.short_name
-                                                              }
-                                                            </span>
-                                                            <div className="text-sm text-gray-500">
-                                                              Уверенность:{" "}
-                                                              {(
-                                                                rubric.confidence *
-                                                                100
-                                                              ).toFixed(1)}
-                                                              %
-                                                            </div>
-                                                          </div>
-                                                        </div>
-                                                        <div className="flex items-center gap-2">
-                                                          <span className="text-sm text-gray-500">
-                                                            {expandedRubrics[
-                                                              rubric.rubric_id
-                                                            ]
-                                                              ? "Скрыть"
-                                                              : "Показать"}
-                                                          </span>
-                                                          {expandedRubrics[
-                                                            rubric.rubric_id
-                                                          ] ? (
-                                                            <ChevronUp className="h-4 w-4 text-gray-500" />
-                                                          ) : (
-                                                            <ChevronDown className="h-4 w-4 text-gray-500" />
-                                                          )}
-                                                        </div>
-                                                      </m.button>
-                                                      <AnimatePresence>
-                                                        {expandedRubrics[
-                                                          rubric.rubric_id
-                                                        ] && (
-                                                          <m.div
-                                                            initial={{
-                                                              opacity: 0,
-                                                              height: 0,
-                                                            }}
-                                                            animate={{
-                                                              opacity: 1,
-                                                              height: "auto",
-                                                            }}
-                                                            exit={{
-                                                              opacity: 0,
-                                                              height: 0,
-                                                            }}
-                                                            transition={{
-                                                              duration: 0.2,
-                                                            }}
-                                                            className="overflow-hidden"
-                                                          >
-                                                            <div className="mt-2 p-3 bg-blue-50 rounded-lg border border-blue-100">
-                                                              <div className="space-y-2">
-                                                                <div className="text-md font-medium text-blue-700">
-                                                                  Полное
-                                                                  название:
-                                                                </div>
-                                                                <div className="text-md text-gray-700 leading-relaxed">
-                                                                  {
-                                                                    rubric.rubric_name
-                                                                  }
-                                                                </div>
-                                                                <div className="pt-2 flex items-center justify-between text-sm text-gray-500">
-                                                                  <div>
-                                                                    Уверенность:{" "}
-                                                                    <span className="font-semibold">
-                                                                      {(
-                                                                        rubric.confidence *
-                                                                        100
-                                                                      ).toFixed(
-                                                                        1
-                                                                      )}
-                                                                      %
-                                                                    </span>
-                                                                  </div>
-                                                                </div>
-                                                              </div>
-                                                            </div>
-                                                          </m.div>
-                                                        )}
-                                                      </AnimatePresence>
-                                                    </div>
-                                                  ))}
-                                              </div>
-                                            </m.div>
-                                          )}
+                                    {message.fileResults ? (
+                                      renderFileResults(message.fileResults)
+                                    ) : message.rubric ? (
+                                      renderRubricContent(
+                                        message.rubric,
+                                        message.allRubrics || null,
+                                        message.id,
+                                      )
+                                    ) : (
+                                      <div className="text-gray-500 text-center py-4">
+                                        Нет данных для отображения
                                       </div>
                                     )}
                                   </m.div>
 
-                                  {/* Кнопка копирования */}
-                                  <div className="mt-3 flex justify-end">
-                                    <m.button
-                                      onClick={() =>
-                                        copyToClipboard(
-                                          formatResults(
-                                            message.rubric,
-                                            message.allRubrics || null
-                                          ),
-                                          message.id
-                                        )
-                                      }
-                                      whileHover={{ scale: 1.05 }}
-                                      whileTap={{ scale: 0.95 }}
-                                      className="flex items-center gap-2 rounded-lg bg-gray-100 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-200 transition-colors"
-                                    >
-                                      {copiedId === message.id ? (
-                                        <>
-                                          <Check className="h-4 w-4" />
-                                          Скопировано
-                                        </>
-                                      ) : (
-                                        <>
-                                          <Copy className="h-4 w-4" />
-                                          Копировать результат
-                                        </>
-                                      )}
-                                    </m.button>
-                                  </div>
+                                  {message.rubric && (
+                                    <div className="mt-3 flex justify-end">
+                                      <m.button
+                                        onClick={() =>
+                                          copyToClipboard(
+                                            formatResults(
+                                              message.rubric,
+                                              message.allRubrics || null,
+                                            ),
+                                            message.id,
+                                          )
+                                        }
+                                        whileHover={{ scale: 1.05 }}
+                                        whileTap={{ scale: 0.95 }}
+                                        className="flex items-center gap-2 rounded-lg bg-gray-100 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-200 transition-colors"
+                                      >
+                                        {copiedId === message.id ? (
+                                          <>
+                                            <Check className="h-4 w-4" />
+                                            Скопировано
+                                          </>
+                                        ) : (
+                                          <>
+                                            <Copy className="h-4 w-4" />
+                                            Копировать все данные
+                                          </>
+                                        )}
+                                      </m.button>
+                                    </div>
+                                  )}
                                 </div>
                               </m.div>
                             </div>
@@ -696,25 +1024,60 @@ export default function App() {
               </div>
             </div>
 
-            {/* Панель ввода */}
             <div className="border-t border-gray-200 bg-white p-4">
               <m.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 className="mx-auto max-w-4xl"
               >
+                {files.length > 0 && (
+                  <m.div
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="mb-3"
+                  >
+                    <div className="text-sm font-medium text-gray-700 mb-2">
+                      Выбранные файлы ({files.length}):
+                    </div>
+                    <div className="space-y-2 max-h-32 overflow-y-auto">
+                      {files.map((file, index) => (
+                        <div
+                          key={index}
+                          className="flex items-center justify-between bg-blue-50 rounded-lg p-2 border border-blue-100"
+                        >
+                          <div className="flex items-center gap-2">
+                            <File className="h-4 w-4 text-blue-600" />
+                            <span className="text-sm text-gray-700 truncate max-w-xs">
+                              {file.name}
+                            </span>
+                            <span className="text-xs text-gray-500">
+                              ({(file.size / 1024).toFixed(1)} KB)
+                            </span>
+                          </div>
+                          <button
+                            onClick={() => removeFile(index)}
+                            className="p-1 hover:bg-blue-100 rounded-full transition-colors"
+                          >
+                            <X className="h-4 w-4 text-gray-500" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </m.div>
+                )}
+
                 <div className="relative">
                   <m.textarea
                     ref={inputRef}
                     value={inputValue}
                     onChange={(e) => setInputValue(e.target.value)}
                     onKeyDown={handleKeyDown}
-                    placeholder="Введите текст обращения для классификации..."
-                    className="w-full resize-none rounded-xl border border-gray-300 bg-white p-4 pr-16 text-gray-800 transition-all duration-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 focus:outline-none"
+                    placeholder="Введите текст обращения или загрузите файлы..."
+                    className="w-full resize-none rounded-xl border border-gray-300 bg-white p-4 pr-36 text-gray-800 transition-all duration-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 focus:outline-none"
                     rows={isMobile ? 2 : 3}
+                    disabled={isLoading}
                   />
 
-                  {/* Индикатор символов */}
                   {inputValue.length > 0 && (
                     <m.div
                       initial={{ opacity: 0, scale: 0.8 }}
@@ -725,14 +1088,47 @@ export default function App() {
                     </m.div>
                   )}
 
-                  {/* Кнопка отправки */}
+                  <m.button
+                    onClick={handleUploadClick}
+                    disabled={isLoading}
+                    whileHover={!isLoading ? { scale: 1.05 } : {}}
+                    whileTap={!isLoading ? { scale: 0.95 } : {}}
+                    className={`absolute right-20 bottom-3 flex h-10 items-center gap-2 rounded-lg px-3 shadow-sm transition-all duration-200 ${
+                      isLoading
+                        ? "bg-gray-300 cursor-not-allowed"
+                        : "bg-gray-100 hover:bg-gray-200"
+                    }`}
+                  >
+                    <Upload className="h-4 w-4 text-gray-700" />
+                    <span className="text-sm text-gray-700">
+                      {isMobile ? "Файл" : "Загрузить"}
+                    </span>
+                  </m.button>
+
+                  <input
+                    type="file"
+                    ref={fileInputRef}
+                    onChange={handleFileChange}
+                    className="hidden"
+                    multiple
+                    accept=".txt,.pdf,.doc,.docx,.rtf"
+                  />
+
                   <m.button
                     onClick={handleSendMessage}
-                    disabled={isLoading || !inputValue}
-                    whileHover={!isLoading && inputValue ? { scale: 1.1 } : {}}
-                    whileTap={!isLoading && inputValue ? { scale: 0.9 } : {}}
+                    disabled={isLoading || (!inputValue && files.length === 0)}
+                    whileHover={
+                      !isLoading && (inputValue || files.length > 0)
+                        ? { scale: 1.1 }
+                        : {}
+                    }
+                    whileTap={
+                      !isLoading && (inputValue || files.length > 0)
+                        ? { scale: 0.9 }
+                        : {}
+                    }
                     className={`absolute right-3 bottom-3 flex h-12 w-12 items-center justify-center rounded-lg shadow-sm transition-all duration-200 ${
-                      isLoading || !inputValue
+                      isLoading || (!inputValue && files.length === 0)
                         ? "bg-gray-300 cursor-not-allowed"
                         : "bg-blue-600 hover:bg-blue-700 hover:shadow-md"
                     }`}
@@ -753,18 +1149,19 @@ export default function App() {
                   </m.button>
                 </div>
 
-                {/* Подсказки */}
-                <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
                   <p className="text-xs text-gray-500">
                     Нажмите Enter для отправки, Shift+Enter для новой строки
                   </p>
+                  <div className="text-xs text-gray-500">
+                    Поддерживаемые форматы: .pdf, .doc, .docx
+                  </div>
                 </div>
               </m.div>
             </div>
           </main>
         </div>
 
-        {/* Правая боковая рамка */}
         {!isMobile && (
           <m.div
             initial={{ opacity: 0, x: 20 }}
@@ -790,28 +1187,28 @@ export default function App() {
                   <div className="space-y-3">
                     <div className="p-3 rounded-lg bg-blue-50/50 border border-blue-100">
                       <div className="text-sm font-medium text-blue-700 mb-1">
-                        1. Ввод текста
+                        📝 Текстовый ввод
                       </div>
                       <div className="text-xs text-gray-600">
-                        Отправьте текст обращения для анализа
+                        Введите текст обращения напрямую
                       </div>
                     </div>
 
                     <div className="p-3 rounded-lg bg-blue-50/50 border border-blue-100">
                       <div className="text-sm font-medium text-blue-700 mb-1">
-                        2. Анализ ИИ
+                        📎 Загрузка файлов
                       </div>
                       <div className="text-xs text-gray-600">
-                        Система определяет наиболее подходящую рубрику
+                        Загрузите один или несколько файлов
                       </div>
                     </div>
 
                     <div className="p-3 rounded-lg bg-blue-50/50 border border-blue-100">
                       <div className="text-sm font-medium text-blue-700 mb-1">
-                        3. Результат
+                        📋 Готовый ответ
                       </div>
                       <div className="text-xs text-gray-600">
-                        Получите классификацию с уровнем уверенности
+                        Получите ответ для выбранной рубрики
                       </div>
                     </div>
                   </div>
