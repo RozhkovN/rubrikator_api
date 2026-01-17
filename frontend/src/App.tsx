@@ -18,6 +18,7 @@ import {
   MessageSquare,
   Eye,
   EyeOff,
+  ChevronUp as ChevronUpIcon,
 } from "lucide-react";
 
 interface Rubric {
@@ -34,7 +35,6 @@ interface APIResponse {
   all_predictions: Rubric[] | null;
 }
 
-// Обновленный интерфейс для файлов с вариантами
 interface FileResultWithOptions {
   filename: string;
   text: string;
@@ -43,7 +43,6 @@ interface FileResultWithOptions {
   error: string | null;
 }
 
-// Старый интерфейс для обратной совместимости
 interface SimpleFileResult {
   filename: string;
   text: string;
@@ -72,7 +71,6 @@ type Message = {
   error?: string;
   fileName?: string;
   isFileMessage?: boolean;
-  // Обновлено для поддержки обоих форматов
   fileResults?: (FileResultWithOptions | SimpleFileResult)[];
   showTemplate?: boolean;
 };
@@ -82,7 +80,7 @@ type ExpandedRubric = {
 };
 
 type ExpandedFileRubric = {
-  [key: string]: boolean; // ключ: `${fileIndex}-${rubricId}`
+  [key: string]: boolean;
 };
 
 type FileTemplateVisibility = {
@@ -98,17 +96,18 @@ export default function App() {
   const [files, setFiles] = useState<File[]>([]);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [expandedRubrics, setExpandedRubrics] = useState<ExpandedRubric>({});
-  // Новые состояния для файлов с вариантами
   const [expandedFileRubrics, setExpandedFileRubrics] =
     useState<ExpandedFileRubric>({});
   const [fileTemplateVisibility, setFileTemplateVisibility] =
     useState<FileTemplateVisibility>({});
 
+  // Состояние для управления видимостью статистики (изначально скрыта)
+  const [showStatistics, setShowStatistics] = useState(false);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Адаптация для мобильных устройств
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
 
   useEffect(() => {
@@ -135,7 +134,6 @@ export default function App() {
     }));
   };
 
-  // Новые функции для управления файловыми рубриками
   const toggleFileRubricExpansion = (fileIndex: number, rubricId: number) => {
     const key = `${fileIndex}-${rubricId}`;
     setExpandedFileRubrics((prev) => ({
@@ -160,6 +158,17 @@ export default function App() {
       ),
     );
   };
+
+  // Функция для переключения видимости статистики
+  const toggleStatistics = () => {
+    setShowStatistics(!showStatistics);
+  };
+
+  // Вычисляемая статистика
+  const totalRequests = messages.filter(
+    (m) => !m.isUser && !m.isLoading,
+  ).length;
+  const fileMessages = messages.filter((m) => m.isFileMessage).length;
 
   const copyToClipboard = async (text: string, messageId: string) => {
     try {
@@ -412,23 +421,17 @@ export default function App() {
       .map((line) => line.trim());
   };
 
-  // Функция для проверки типа результата файла
   const isFileResultWithOptions = (
     result: FileResultWithOptions | SimpleFileResult,
   ): result is FileResultWithOptions => {
     return "best_match" in result && "all_predictions" in result;
   };
 
-  // Рендер контента для файла с вариантами
   const renderFileResultWithOptions = (
     result: FileResultWithOptions,
     fileIndex: number,
   ) => {
-    const {
-      best_match: rubric,
-      all_predictions: allRubrics,
-      text: fileText,
-    } = result;
+    const { best_match: rubric, all_predictions: allRubrics } = result;
     const showTemplate = fileTemplateVisibility[fileIndex] || false;
 
     return (
@@ -439,7 +442,6 @@ export default function App() {
         transition={{ delay: fileIndex * 0.1 }}
         className="border border-gray-200 rounded-lg overflow-hidden"
       >
-        {/* Заголовок файла */}
         <div className="bg-gray-50 p-3 border-b border-gray-200">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -455,17 +457,10 @@ export default function App() {
               </span>
             </div>
           </div>
-          {fileText && (
-            <div className="mt-2 text-sm text-gray-600 italic">
-              "{fileText}"
-            </div>
-          )}
         </div>
 
-        {/* Содержимое файла */}
         <div className="p-4">
           <div className="space-y-4">
-            {/* Основная рубрика */}
             <div>
               <div className="text-sm font-medium text-gray-500 mb-1">
                 Рубрика:
@@ -475,7 +470,6 @@ export default function App() {
               </div>
             </div>
 
-            {/* Ответ */}
             <div className="border-t border-gray-100 pt-3">
               <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-2">
@@ -559,7 +553,6 @@ export default function App() {
               </AnimatePresence>
             </div>
 
-            {/* Дополнительные варианты */}
             {allRubrics && allRubrics.length > 1 && (
               <div className="border-t border-gray-100 pt-3">
                 <h4 className="mb-2 text-sm font-medium text-gray-700">
@@ -680,7 +673,6 @@ export default function App() {
     );
   };
 
-  // Рендер контента для старого формата файла
   const renderSimpleFileResult = (
     result: SimpleFileResult,
     fileIndex: number,
@@ -826,7 +818,6 @@ export default function App() {
           </div>
         </div>
 
-        {/* Шаблон ответа */}
         <div className="border-t border-gray-100 pt-4">
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
@@ -1015,56 +1006,88 @@ export default function App() {
   return (
     <LazyMotion features={domAnimation}>
       <div className="flex h-screen w-screen overflow-hidden bg-gray-50">
-        {/* Левая боковая рамка */}
+        {/* Левая боковая рамка - фиксированная ширина */}
         {!isMobile && (
           <m.div
             initial={{ opacity: 0, x: -20 }}
             animate={{ opacity: 1, x: 0 }}
             transition={{ duration: 0.5 }}
-            className="w-20 lg:w-64 bg-linear-to-b from-blue-600 to-blue-800 border-r border-blue-700"
+            className="w-20 lg:w-64 bg-linear-to-b from-blue-600 to-blue-800 border-r border-blue-700 flex flex-col"
           >
             <div className="h-full p-4 flex flex-col">
               <div className="mb-8">
                 <div className="flex items-center justify-center lg:justify-start gap-2">
-                  <FileText className="h-6 w-6 text-white" />
-                  <span className="hidden lg:inline text-white font-semibold text-sm">
-                    рубрикатор
-                  </span>
+                  <img src="/logo.png" alt="Logo" className="h-22 w-22" />
                 </div>
               </div>
 
-              <div className="flex-1 flex flex-col items-center lg:items-start gap-4">
-                <div className="text-white/80 text-xs uppercase tracking-wider hidden lg:block">
-                  Статистика
-                </div>
-                <div className="w-full p-3 rounded-lg bg-white/10 backdrop-blur-sm">
-                  <div className="text-white text-sm font-medium mb-1">
-                    Анализов
-                  </div>
-                  <div className="text-white text-2xl font-bold">
-                    {messages.filter((m) => !m.isUser && !m.isLoading).length}
-                  </div>
-                </div>
+              {/* Кнопка для переключения видимости статистики */}
+              <m.button
+                onClick={toggleStatistics}
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                className="flex items-center justify-center lg:justify-start gap-2 mb-4 p-2 rounded-lg bg-white/10 hover:bg-white/20 transition-colors"
+              >
+                <BarChart3 className="h-5 w-5 text-white" />
+                {!isMobile && (
+                  <m.span
+                    initial={{ opacity: 0, width: 0 }}
+                    animate={{ opacity: 1, width: "auto" }}
+                    exit={{ opacity: 0, width: 0 }}
+                    className="text-white text-sm font-medium whitespace-nowrap overflow-hidden"
+                  >
+                    {showStatistics
+                      ? "Скрыть статистику"
+                      : "Показать статистику"}
+                  </m.span>
+                )}
+                <m.div
+                  animate={{ rotate: showStatistics ? 180 : 0 }}
+                  transition={{ duration: 0.3 }}
+                  className="text-white"
+                >
+                  <ChevronUpIcon className="h-4 w-4" />
+                </m.div>
+              </m.button>
 
-                <div className="w-full p-3 rounded-lg bg-white/10 backdrop-blur-sm">
-                  <div className="text-white text-sm font-medium mb-1">
-                    Файлов
-                  </div>
-                  <div className="text-white text-2xl font-bold">
-                    {messages.filter((m) => m.isFileMessage).length}
-                  </div>
+              {/* Базовый контент боковой панели */}
+              <div className="flex-1">
+                <div className="space-y-4">
+                  {/* Мини-статистика в свернутом состоянии */}
+                  {showStatistics && (
+                    <div className="space-y-3">
+                      <div className="p-3 rounded-lg bg-white/10 backdrop-blur-sm">
+                        <div className="text-white text-center">
+                          <div className="text-white text-xl font-bold mb-1">
+                            {totalRequests}
+                          </div>
+                          <div className="text-white/70 text-xs">Запросов</div>
+                        </div>
+                      </div>
+                      <div className="p-3 rounded-lg bg-white/10 backdrop-blur-sm">
+                        <div className="text-white text-center">
+                          <div className="text-white text-xl font-bold mb-1">
+                            {fileMessages}
+                          </div>
+                          <div className="text-white/70 text-xs">Файлов</div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
           </m.div>
         )}
 
-        <div className="flex flex-1 flex-col">
+        <div className="flex flex-1 flex-col relative">
           <m.header
             initial={{ y: -50, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
             transition={{ duration: 0.5 }}
-            className="sticky top-0 z-20 bg-white border-b border-gray-200 shadow-sm"
+            className={`sticky top-0 z-20 bg-white border-b border-gray-200 shadow-sm ${
+              showStatistics && !isMobile ? "mt-0" : ""
+            }`}
           >
             <div className="mx-auto max-w-4xl px-4 py-4 sm:px-6">
               <div className="flex items-center justify-center">
@@ -1513,7 +1536,7 @@ export default function App() {
                   <div className="space-y-3">
                     <div className="p-3 rounded-lg bg-blue-50/50 border border-blue-100">
                       <div className="text-sm font-medium text-blue-700 mb-1">
-                        📝 Текстовый ввод
+                        Текстовый ввод
                       </div>
                       <div className="text-xs text-gray-600">
                         Введите текст обращения напрямую
@@ -1522,7 +1545,7 @@ export default function App() {
 
                     <div className="p-3 rounded-lg bg-blue-50/50 border border-blue-100">
                       <div className="text-sm font-medium text-blue-700 mb-1">
-                        📎 Загрузка файлов
+                        Загрузка файлов
                       </div>
                       <div className="text-xs text-gray-600">
                         Загрузите один или несколько файлов
@@ -1531,10 +1554,10 @@ export default function App() {
 
                     <div className="p-3 rounded-lg bg-blue-50/50 border border-blue-100">
                       <div className="text-sm font-medium text-blue-700 mb-1">
-                        📋 Готовый ответ
+                        Готовый ответ
                       </div>
                       <div className="text-xs text-gray-600">
-                        Получите ответ для выбранной рубрики
+                        Получите ответ
                       </div>
                     </div>
                   </div>
