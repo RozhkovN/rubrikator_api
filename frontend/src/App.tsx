@@ -34,7 +34,17 @@ interface APIResponse {
   all_predictions: Rubric[] | null;
 }
 
-interface FileResult {
+// Обновленный интерфейс для файлов с вариантами
+interface FileResultWithOptions {
+  filename: string;
+  text: string;
+  best_match: Rubric;
+  all_predictions: Rubric[] | null;
+  error: string | null;
+}
+
+// Старый интерфейс для обратной совместимости
+interface SimpleFileResult {
   filename: string;
   text: string;
   rubric_id: number;
@@ -46,7 +56,7 @@ interface FileResult {
 }
 
 interface MultiFileResponse {
-  results: FileResult[];
+  results: (FileResultWithOptions | SimpleFileResult)[];
   total: number;
   success: number;
   failed: number;
@@ -62,12 +72,21 @@ type Message = {
   error?: string;
   fileName?: string;
   isFileMessage?: boolean;
-  fileResults?: FileResult[];
+  // Обновлено для поддержки обоих форматов
+  fileResults?: (FileResultWithOptions | SimpleFileResult)[];
   showTemplate?: boolean;
 };
 
 type ExpandedRubric = {
   [rubricId: number]: boolean;
+};
+
+type ExpandedFileRubric = {
+  [key: string]: boolean; // ключ: `${fileIndex}-${rubricId}`
+};
+
+type FileTemplateVisibility = {
+  [fileIndex: number]: boolean;
 };
 
 export default function App() {
@@ -79,6 +98,12 @@ export default function App() {
   const [files, setFiles] = useState<File[]>([]);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [expandedRubrics, setExpandedRubrics] = useState<ExpandedRubric>({});
+  // Новые состояния для файлов с вариантами
+  const [expandedFileRubrics, setExpandedFileRubrics] =
+    useState<ExpandedFileRubric>({});
+  const [fileTemplateVisibility, setFileTemplateVisibility] =
+    useState<FileTemplateVisibility>({});
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -107,6 +132,22 @@ export default function App() {
     setExpandedRubrics((prev) => ({
       ...prev,
       [rubricId]: !prev[rubricId],
+    }));
+  };
+
+  // Новые функции для управления файловыми рубриками
+  const toggleFileRubricExpansion = (fileIndex: number, rubricId: number) => {
+    const key = `${fileIndex}-${rubricId}`;
+    setExpandedFileRubrics((prev) => ({
+      ...prev,
+      [key]: !prev[key],
+    }));
+  };
+
+  const toggleFileTemplateVisibility = (fileIndex: number) => {
+    setFileTemplateVisibility((prev) => ({
+      ...prev,
+      [fileIndex]: !prev[fileIndex],
     }));
   };
 
@@ -212,6 +253,8 @@ export default function App() {
     setIsLoading(true);
     setIsUploading(hasFiles);
     setExpandedRubrics({});
+    setExpandedFileRubrics({});
+    setFileTemplateVisibility({});
 
     setMessages((prev) => [
       ...prev,
@@ -233,6 +276,7 @@ export default function App() {
             `${API_URL}/classify/file`,
             formData,
             {
+              params: { top_k: 2 },
               headers: {
                 "Content-Type": "multipart/form-data",
               },
@@ -265,6 +309,7 @@ export default function App() {
             `${API_URL}/classify/files`,
             formData,
             {
+              params: { top_k: 2 },
               headers: {
                 "Content-Type": "multipart/form-data",
               },
@@ -367,6 +412,394 @@ export default function App() {
       .map((line) => line.trim());
   };
 
+  // Функция для проверки типа результата файла
+  const isFileResultWithOptions = (
+    result: FileResultWithOptions | SimpleFileResult,
+  ): result is FileResultWithOptions => {
+    return "best_match" in result && "all_predictions" in result;
+  };
+
+  // Рендер контента для файла с вариантами
+  const renderFileResultWithOptions = (
+    result: FileResultWithOptions,
+    fileIndex: number,
+  ) => {
+    const {
+      best_match: rubric,
+      all_predictions: allRubrics,
+      text: fileText,
+    } = result;
+    const showTemplate = fileTemplateVisibility[fileIndex] || false;
+
+    return (
+      <m.div
+        key={fileIndex}
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: fileIndex * 0.1 }}
+        className="border border-gray-200 rounded-lg overflow-hidden"
+      >
+        {/* Заголовок файла */}
+        <div className="bg-gray-50 p-3 border-b border-gray-200">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <File className="h-4 w-4 text-blue-600" />
+              <div className="font-medium text-gray-700 truncate">
+                {result.filename}
+              </div>
+            </div>
+            <div className="flex items-center gap-2 px-2 py-1 rounded-full bg-blue-50">
+              <BarChart3 className="h-3 w-3 text-blue-600" />
+              <span className="text-xs font-bold text-blue-700">
+                {(rubric.confidence * 100).toFixed(1)}%
+              </span>
+            </div>
+          </div>
+          {fileText && (
+            <div className="mt-2 text-sm text-gray-600 italic">
+              "{fileText}"
+            </div>
+          )}
+        </div>
+
+        {/* Содержимое файла */}
+        <div className="p-4">
+          <div className="space-y-4">
+            {/* Основная рубрика */}
+            <div>
+              <div className="text-sm font-medium text-gray-500 mb-1">
+                Рубрика:
+              </div>
+              <div className="text-sm font-semibold text-gray-800">
+                {rubric.short_name}
+              </div>
+            </div>
+
+            {/* Ответ */}
+            <div className="border-t border-gray-100 pt-3">
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <MessageSquare className="h-4 w-4 text-blue-600" />
+                  <div className="text-sm font-medium text-gray-700">Ответ</div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <m.button
+                    onClick={() => toggleFileTemplateVisibility(fileIndex)}
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
+                    className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700"
+                  >
+                    {showTemplate ? (
+                      <>
+                        <EyeOff className="h-3 w-3" />
+                        Скрыть ответ
+                      </>
+                    ) : (
+                      <>
+                        <Eye className="h-3 w-3" />
+                        Показать ответ
+                      </>
+                    )}
+                  </m.button>
+                  <m.button
+                    onClick={() =>
+                      copyToClipboard(
+                        rubric.response_template,
+                        `file-${fileIndex}`,
+                      )
+                    }
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
+                    className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700"
+                  >
+                    <Copy className="h-3 w-3" />
+                    Копировать
+                  </m.button>
+                </div>
+              </div>
+
+              <AnimatePresence>
+                {showTemplate && (
+                  <m.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: "auto" }}
+                    exit={{ opacity: 0, height: 0 }}
+                    transition={{ duration: 0.3 }}
+                    className="overflow-hidden"
+                  >
+                    <div className="bg-blue-50 rounded-lg border border-blue-100 overflow-hidden mt-2">
+                      <div className="p-4 max-h-64 overflow-y-auto">
+                        <div className="space-y-3">
+                          {formatTemplateText(rubric.response_template).map(
+                            (paragraph, paragraphIndex) => (
+                              <m.p
+                                key={paragraphIndex}
+                                initial={{ opacity: 0, y: 5 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                transition={{ delay: paragraphIndex * 0.05 }}
+                                className="text-sm text-gray-700 leading-relaxed"
+                              >
+                                {paragraph}
+                              </m.p>
+                            ),
+                          )}
+                        </div>
+                      </div>
+                      <div className="px-4 py-3 bg-blue-100 border-t border-blue-200">
+                        <div className="flex justify-between items-center text-xs text-blue-700">
+                          <div className="font-medium">
+                            Длина ответа: {rubric.response_template.length}{" "}
+                            символов
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </m.div>
+                )}
+              </AnimatePresence>
+            </div>
+
+            {/* Дополнительные варианты */}
+            {allRubrics && allRubrics.length > 1 && (
+              <div className="border-t border-gray-100 pt-3">
+                <h4 className="mb-2 text-sm font-medium text-gray-700">
+                  Дополнительные варианты
+                </h4>
+                <div className="space-y-2">
+                  {allRubrics.slice(1).map((additionalRubric, rubricIndex) => {
+                    const key = `${fileIndex}-${additionalRubric.rubric_id}`;
+                    const isExpanded = expandedFileRubrics[key] || false;
+
+                    return (
+                      <div key={additionalRubric.rubric_id}>
+                        <m.button
+                          onClick={() =>
+                            toggleFileRubricExpansion(
+                              fileIndex,
+                              additionalRubric.rubric_id,
+                            )
+                          }
+                          className={`w-full flex items-center justify-between rounded-lg p-3 hover:bg-gray-50 transition-colors ${
+                            isExpanded
+                              ? "bg-gray-50 border border-gray-200"
+                              : "bg-white border border-gray-100"
+                          }`}
+                        >
+                          <div className="flex items-center gap-3">
+                            <div className="flex h-6 w-6 items-center justify-center rounded-full bg-gray-300 text-gray-600">
+                              <span className="text-xs font-bold">
+                                {rubricIndex + 2}
+                              </span>
+                            </div>
+                            <div className="text-left">
+                              <span className="text-sm text-gray-700">
+                                {additionalRubric.short_name}
+                              </span>
+                              <div className="text-sm text-gray-500">
+                                Уверенность:{" "}
+                                {(additionalRubric.confidence * 100).toFixed(1)}
+                                %
+                              </div>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm text-gray-500">
+                              {isExpanded ? "Скрыть" : "Показать"}
+                            </span>
+                            {isExpanded ? (
+                              <ChevronUp className="h-4 w-4 text-gray-500" />
+                            ) : (
+                              <ChevronDown className="h-4 w-4 text-gray-500" />
+                            )}
+                          </div>
+                        </m.button>
+                        <AnimatePresence>
+                          {isExpanded && (
+                            <m.div
+                              initial={{ opacity: 0, height: 0 }}
+                              animate={{ opacity: 1, height: "auto" }}
+                              exit={{ opacity: 0, height: 0 }}
+                              transition={{ duration: 0.2 }}
+                              className="overflow-hidden"
+                            >
+                              <div className="mt-2 p-4 bg-blue-50 rounded-lg border border-blue-100">
+                                <div className="space-y-3">
+                                  <div className="text-sm font-medium text-blue-700">
+                                    Полное название:
+                                  </div>
+                                  <div className="text-sm text-gray-700 leading-relaxed">
+                                    {additionalRubric.rubric_name}
+                                  </div>
+                                  <div className="pt-3 border-t border-blue-100">
+                                    <div className="text-sm font-medium text-blue-700 mb-2">
+                                      Ответ:
+                                    </div>
+                                    <div className="text-sm text-gray-700 leading-relaxed bg-white p-3 rounded border border-blue-100 max-h-40 overflow-y-auto">
+                                      {additionalRubric.response_template}
+                                    </div>
+                                  </div>
+                                  <div className="flex items-center justify-between text-sm text-gray-500">
+                                    <div>
+                                      Уверенность:{" "}
+                                      <span className="font-semibold">
+                                        {(
+                                          additionalRubric.confidence * 100
+                                        ).toFixed(1)}
+                                        %
+                                      </span>
+                                    </div>
+                                    <m.button
+                                      onClick={() =>
+                                        copyToClipboard(
+                                          additionalRubric.response_template,
+                                          `file-${fileIndex}-${additionalRubric.rubric_id}`,
+                                        )
+                                      }
+                                      whileHover={{ scale: 1.05 }}
+                                      whileTap={{ scale: 0.95 }}
+                                      className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700"
+                                    >
+                                      <Copy className="h-3 w-3" />
+                                      Копировать
+                                    </m.button>
+                                  </div>
+                                </div>
+                              </div>
+                            </m.div>
+                          )}
+                        </AnimatePresence>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </m.div>
+    );
+  };
+
+  // Рендер контента для старого формата файла
+  const renderSimpleFileResult = (
+    result: SimpleFileResult,
+    fileIndex: number,
+  ) => {
+    return (
+      <m.div
+        key={fileIndex}
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: fileIndex * 0.1 }}
+        className="border border-gray-200 rounded-lg overflow-hidden"
+      >
+        <div className="bg-gray-50 p-3 border-b border-gray-200">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <File className="h-4 w-4 text-blue-600" />
+              <div className="font-medium text-gray-700 truncate">
+                {result.filename}
+              </div>
+            </div>
+            <div className="flex items-center gap-2 px-2 py-1 rounded-full bg-blue-50">
+              <BarChart3 className="h-3 w-3 text-blue-600" />
+              <span className="text-xs font-bold text-blue-700">
+                {(result.confidence * 100).toFixed(1)}%
+              </span>
+            </div>
+          </div>
+          {result.text && (
+            <div className="mt-2 text-sm text-gray-600 italic">
+              "{result.text}"
+            </div>
+          )}
+        </div>
+
+        <div className="p-4">
+          {result.error ? (
+            <div className="text-sm text-red-500 bg-red-50 p-3 rounded">
+              Ошибка: {result.error}
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <div>
+                <div className="text-sm font-medium text-gray-500 mb-1">
+                  Рубрика:
+                </div>
+                <div className="text-sm font-semibold text-gray-800">
+                  {result.short_name}
+                </div>
+              </div>
+
+              <div className="border-t border-gray-100 pt-3">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <MessageSquare className="h-4 w-4 text-blue-600" />
+                    <div className="text-sm font-medium text-gray-700">
+                      Ответ
+                    </div>
+                  </div>
+                  <m.button
+                    onClick={() =>
+                      copyToClipboard(
+                        result.response_template,
+                        `file-${fileIndex}`,
+                      )
+                    }
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
+                    className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700"
+                  >
+                    <Copy className="h-3 w-3" />
+                    Копировать
+                  </m.button>
+                </div>
+                <div className="text-sm text-gray-700 leading-relaxed bg-blue-50 p-3 rounded border border-blue-100 max-h-32 overflow-y-auto">
+                  {result.response_template}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </m.div>
+    );
+  };
+
+  const renderFileResults = (
+    fileResults: (FileResultWithOptions | SimpleFileResult)[],
+  ) => (
+    <div className="space-y-4">
+      <div className="grid grid-cols-3 gap-2 mb-4 p-3 bg-gray-50 rounded-lg">
+        <div className="text-center">
+          <div className="text-lg font-bold text-blue-600">
+            {fileResults.length}
+          </div>
+          <div className="text-xs text-gray-600">Всего файлов</div>
+        </div>
+        <div className="text-center">
+          <div className="text-lg font-bold text-green-600">
+            {fileResults.filter((f) => !f.error).length}
+          </div>
+          <div className="text-xs text-gray-600">Успешно</div>
+        </div>
+        <div className="text-center">
+          <div className="text-lg font-bold text-red-600">
+            {fileResults.filter((f) => f.error).length}
+          </div>
+          <div className="text-xs text-gray-600">С ошибками</div>
+        </div>
+      </div>
+
+      {fileResults.map((result, fileIndex) => {
+        if (isFileResultWithOptions(result)) {
+          return renderFileResultWithOptions(result, fileIndex);
+        } else {
+          return renderSimpleFileResult(result, fileIndex);
+        }
+      })}
+    </div>
+  );
+
   const renderRubricContent = (
     rubric: Rubric,
     allRubrics: Rubric[] | null,
@@ -398,9 +831,7 @@ export default function App() {
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
               <MessageSquare className="h-4 w-4 text-blue-600" />
-              <h4 className="text-sm font-medium text-gray-700">
-                Ответ
-              </h4>
+              <h4 className="text-sm font-medium text-gray-700">Ответ</h4>
             </div>
             <m.button
               onClick={() => toggleTemplateVisibility(messageId)}
@@ -452,8 +883,7 @@ export default function App() {
                   <div className="px-4 py-3 bg-blue-100 border-t border-blue-200">
                     <div className="flex justify-between items-center text-xs text-blue-700">
                       <div className="font-medium">
-                        Длина ответа: {rubric.response_template.length}{" "}
-                        символов
+                        Длина ответа: {rubric.response_template.length} символов
                       </div>
                       <m.button
                         onClick={() =>
@@ -579,110 +1009,6 @@ export default function App() {
           </div>
         </m.div>
       )}
-    </div>
-  );
-
-  const renderFileResults = (fileResults: FileResult[]) => (
-    <div className="space-y-4">
-      <div className="grid grid-cols-3 gap-2 mb-4 p-3 bg-gray-50 rounded-lg">
-        <div className="text-center">
-          <div className="text-lg font-bold text-blue-600">
-            {fileResults.length}
-          </div>
-          <div className="text-xs text-gray-600">Всего файлов</div>
-        </div>
-        <div className="text-center">
-          <div className="text-lg font-bold text-green-600">
-            {fileResults.filter((f) => !f.error).length}
-          </div>
-          <div className="text-xs text-gray-600">Успешно</div>
-        </div>
-        <div className="text-center">
-          <div className="text-lg font-bold text-red-600">
-            {fileResults.filter((f) => f.error).length}
-          </div>
-          <div className="text-xs text-gray-600">С ошибками</div>
-        </div>
-      </div>
-
-      {fileResults.map((result, fileIndex) => (
-        <m.div
-          key={fileIndex}
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: fileIndex * 0.1 }}
-          className="border border-gray-200 rounded-lg overflow-hidden"
-        >
-          <div className="bg-gray-50 p-3 border-b border-gray-200">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <File className="h-4 w-4 text-blue-600" />
-                <div className="font-medium text-gray-700 truncate">
-                  {result.filename}
-                </div>
-              </div>
-              <div className="flex items-center gap-2 px-2 py-1 rounded-full bg-blue-50">
-                <BarChart3 className="h-3 w-3 text-blue-600" />
-                <span className="text-xs font-bold text-blue-700">
-                  {(result.confidence * 100).toFixed(1)}%
-                </span>
-              </div>
-            </div>
-            {result.text && (
-              <div className="mt-2 text-sm text-gray-600 italic">
-                "{result.text}"
-              </div>
-            )}
-          </div>
-
-          <div className="p-4">
-            {result.error ? (
-              <div className="text-sm text-red-500 bg-red-50 p-3 rounded">
-                Ошибка: {result.error}
-              </div>
-            ) : (
-              <div className="space-y-3">
-                <div>
-                  <div className="text-sm font-medium text-gray-500 mb-1">
-                    Рубрика:
-                  </div>
-                  <div className="text-sm font-semibold text-gray-800">
-                    {result.short_name}
-                  </div>
-                </div>
-
-                <div className="border-t border-gray-100 pt-3">
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="flex items-center gap-2">
-                      <MessageSquare className="h-4 w-4 text-blue-600" />
-                      <div className="text-sm font-medium text-gray-700">
-                        Ответ
-                      </div>
-                    </div>
-                    <m.button
-                      onClick={() =>
-                        copyToClipboard(
-                          result.response_template,
-                          `file-${fileIndex}`,
-                        )
-                      }
-                      whileHover={{ scale: 1.05 }}
-                      whileTap={{ scale: 0.95 }}
-                      className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700"
-                    >
-                      <Copy className="h-3 w-3" />
-                      Копировать
-                    </m.button>
-                  </div>
-                  <div className="text-sm text-gray-700 leading-relaxed bg-blue-50 p-3 rounded border border-blue-100 max-h-32 overflow-y-auto">
-                    {result.response_template}
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        </m.div>
-      ))}
     </div>
   );
 
