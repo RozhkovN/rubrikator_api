@@ -4,7 +4,7 @@ FROM node:20-alpine AS builder
 WORKDIR /app
 
 # Принимаем переменные окружения как build arguments
-ARG VITE_API_URL=http://80.253.19.93:8800
+ARG VITE_API_URL=http://82.146.36.22:8800
 
 # Экспортируем как переменные окружения для vite
 ENV VITE_API_URL=$VITE_API_URL
