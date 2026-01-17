@@ -646,11 +646,8 @@ class FileClassificationResult(BaseModel):
     """Результат классификации одного файла"""
     filename: str
     text: str
-    rubric_id: int
-    rubric_name: str
-    short_name: str
-    response_template: str
-    confidence: float
+    best_match: Optional[PredictionItem] = None
+    all_predictions: Optional[List[PredictionItem]] = None
     error: Optional[str] = None
 
 
@@ -664,7 +661,8 @@ class FilesClassificationResponse(BaseModel):
 
 @app.post("/classify/files", response_model=FilesClassificationResponse, tags=["Classification"])
 async def classify_from_files(
-    files: List[UploadFile] = File(..., description="Список документов (.docx, .doc, .pdf)")
+    files: List[UploadFile] = File(..., description="Список документов (.docx, .doc, .pdf)"),
+    top_k: int = 1
 ):
     """
     Пакетная классификация жалоб из нескольких файлов.
@@ -677,11 +675,19 @@ async def classify_from_files(
     - **.pdf** - PDF документ
     
     - **files**: Список файлов, максимум 10
+    - **top_k**: Количество топ результатов для каждого файла (1-5)
     """
     if classifier is None:
         raise HTTPException(
             status_code=503,
             detail="Классификатор не загружен. Сервер не готов к работе."
+        )
+    
+    # Проверяем top_k
+    if top_k < 1 or top_k > 5:
+        raise HTTPException(
+            status_code=400,
+            detail="top_k должен быть от 1 до 5"
         )
     
     # Проверяем количество файлов
@@ -703,11 +709,8 @@ async def classify_from_files(
                 results.append(FileClassificationResult(
                     filename=file.filename,
                     text="",
-                    rubric_id=0,
-                    rubric_name="",
-                    short_name="",
-                    response_template="",
-                    confidence=0.0,
+                    best_match=None,
+                    all_predictions=None,
                     error=f"Неподдерживаемый формат. Поддерживаются: {', '.join(SUPPORTED_EXTENSIONS)}"
                 ))
                 failed_count += 1
@@ -721,11 +724,8 @@ async def classify_from_files(
                 results.append(FileClassificationResult(
                     filename=file.filename,
                     text="",
-                    rubric_id=0,
-                    rubric_name="",
-                    short_name="",
-                    response_template="",
-                    confidence=0.0,
+                    best_match=None,
+                    all_predictions=None,
                     error="Размер файла превышает 10 МБ"
                 ))
                 failed_count += 1
@@ -738,41 +738,42 @@ async def classify_from_files(
                 results.append(FileClassificationResult(
                     filename=file.filename,
                     text=text,
-                    rubric_id=0,
-                    rubric_name="",
-                    short_name="",
-                    response_template="",
-                    confidence=0.0,
+                    best_match=None,
+                    all_predictions=None,
                     error="Текст слишком короткий"
                 ))
                 failed_count += 1
                 continue
             
             # Классифицируем
-            result = classifier.predict(text=text, top_k=1, return_scores=False)
-            pred = result['predictions'][0]
+            result = classifier.predict(text=text, top_k=top_k, return_scores=False)
+            
+            # Формируем предсказания
+            predictions = []
+            for pred in result['predictions']:
+                predictions.append(PredictionItem(
+                    rubric_id=pred['rubric_id'],
+                    rubric_name=pred['rubric_name'],
+                    short_name=pred.get('short_name', ''),
+                    response_template=pred.get('response_template', ''),
+                    confidence=round(pred['confidence'], 4)
+                ))
             
             results.append(FileClassificationResult(
                 filename=file.filename,
                 text=text,
-                rubric_id=pred['rubric_id'],
-                rubric_name=pred['rubric_name'],
-                short_name=pred.get('short_name', ''),
-                response_template=pred.get('response_template', ''),
-                confidence=round(pred['confidence'], 4)
+                best_match=predictions[0],
+                all_predictions=predictions if top_k > 1 else None
             ))
             success_count += 1
-            logger.info(f"✅ Файл {file.filename}: {pred.get('short_name', '')}")
+            logger.info(f"✅ Файл {file.filename}: {predictions[0].short_name}")
             
         except Exception as e:
             results.append(FileClassificationResult(
                 filename=file.filename,
                 text="",
-                rubric_id=0,
-                rubric_name="",
-                short_name="",
-                response_template="",
-                confidence=0.0,
+                best_match=None,
+                all_predictions=None,
                 error=str(e)
             ))
             failed_count += 1
