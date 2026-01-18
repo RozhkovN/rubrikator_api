@@ -39,7 +39,7 @@ services:
         VITE_API_URL: http://80.253.19.93:8800
     container_name: rubrikator-frontend
     ports:
-      - "80:80"
+      - "3800:3880"
     depends_on:
       - backend
     restart: unless-stopped

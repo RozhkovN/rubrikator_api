@@ -7,6 +7,10 @@ pandas
 python-dotenv==1.0.0
 tqdm==4.66.1
 
+# ONNX Runtime для ускорения inference (опционально)
+onnxruntime>=1.16.0
+optimum[onnxruntime]>=1.14.0
+
 # API
 fastapi==0.109.0
 uvicorn==0.27.0

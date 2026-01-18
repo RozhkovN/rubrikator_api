@@ -103,12 +103,22 @@ class ComplaintResponse(BaseModel):
     text: str
     best_match: PredictionItem
     all_predictions: Optional[List[PredictionItem]] = None
+    filtered_count: Optional[int] = None  # Сколько вариантов отфильтровано
 
 
 class HealthResponse(BaseModel):
     """Ответ health check"""
     status: str
     model_loaded: bool
+
+
+class CacheStatsResponse(BaseModel):
+    """Статистика кэша"""
+    size: int
+    max_size: int
+    hits: int
+    misses: int
+    hit_rate: str
 
 
 class TrainRequest(BaseModel):
@@ -118,14 +128,18 @@ class TrainRequest(BaseModel):
         description="Название модели Sentence Transformers"
     )
     use_keywords: bool = Field(True, description="Использовать ли анализ ключевых слов")
-    keyword_weight: float = Field(0.3, description="Вес ключевых слов (0-1)", ge=0, le=1)
+    keyword_weight: float = Field(0.35, description="Вес ключевых слов (0-1)", ge=0, le=1)
+    use_onnx: bool = Field(False, description="Использовать ONNX Runtime для ускорения")
+    cache_size: int = Field(1000, description="Размер LRU кэша для эмбеддингов", ge=100, le=10000)
     
     class Config:
         json_schema_extra = {
             "example": {
                 "model_name": "paraphrase-multilingual-mpnet-base-v2",
                 "use_keywords": True,
-                "keyword_weight": 0.3
+                "keyword_weight": 0.35,
+                "use_onnx": False,
+                "cache_size": 1000
             }
         }
 
@@ -201,7 +215,13 @@ async def classify_complaint(request: ComplaintRequest):
     
     Возвращает:
     - **best_match**: Лучшее совпадение с рубрикатором
-    - **all_predictions**: Все топ-k результатов (если top_k > 1)
+    - **all_predictions**: Все топ-k результатов (если top_k > 1), отфильтрованные по качеству
+    - **filtered_count**: Сколько неуверенных вариантов было отфильтровано
+    
+    Фильтрация дополнительных вариантов:
+    - Удаляются варианты с confidence < 0.25
+    - Удаляются варианты с разрывом > 0.35 от лидера
+    - При высокой уверенности лидера (> 0.65) фильтрация строже
     """
     if classifier is None:
         raise HTTPException(
@@ -228,13 +248,18 @@ async def classify_complaint(request: ComplaintRequest):
                 confidence=round(pred['confidence'], 4)
             ))
         
+        filtered_count = result.get('filtered_count', 0)
+        
         response = ComplaintResponse(
             text=request.text,
             best_match=predictions[0],
-            all_predictions=predictions if request.top_k > 1 else None
+            all_predictions=predictions if request.top_k > 1 else None,
+            filtered_count=filtered_count if request.top_k > 1 else None
         )
         
         logger.info(f"✅ Классифицировано: {predictions[0].short_name} ({predictions[0].confidence:.2%})")
+        if filtered_count > 0:
+            logger.info(f"   📊 Отфильтровано {filtered_count} неуверенных вариантов")
         
         return response
         
@@ -301,6 +326,8 @@ async def train_model(request: TrainRequest):
     - **model_name**: Название модели Sentence Transformers
     - **use_keywords**: Использовать ли анализ ключевых слов
     - **keyword_weight**: Вес ключевых слов (0-1)
+    - **use_onnx**: Использовать ONNX Runtime для ускорения (2-3x прирост)
+    - **cache_size**: Размер LRU кэша для повторяющихся запросов
     
     Примечание: Процесс может занять несколько минут при первом запуске
     (загрузка модели из интернета).
@@ -312,12 +339,16 @@ async def train_model(request: TrainRequest):
         logger.info(f"   Модель: {request.model_name}")
         logger.info(f"   Ключевые слова: {request.use_keywords}")
         logger.info(f"   Вес ключевых слов: {request.keyword_weight}")
+        logger.info(f"   ONNX: {request.use_onnx}")
+        logger.info(f"   Размер кэша: {request.cache_size}")
         
         # Создаем новый классификатор с заданными параметрами
         new_classifier = ComplaintClassifier(
             model_name=request.model_name,
             use_keywords=request.use_keywords,
-            keyword_weight=request.keyword_weight
+            keyword_weight=request.keyword_weight,
+            use_onnx=request.use_onnx,
+            cache_size=request.cache_size
         )
         
         # Путь для сохранения модели
@@ -350,7 +381,7 @@ async def get_model_info():
     """
     Получение информации о текущей загруженной модели.
     
-    Возвращает параметры и статус модели.
+    Возвращает параметры и статус модели, включая статистику кэша.
     """
     if classifier is None:
         return {
@@ -358,13 +389,56 @@ async def get_model_info():
             "message": "Модель не загружена"
         }
     
+    cache_stats = classifier.get_cache_stats()
+    
     return {
         "loaded": True,
         "model_name": classifier.model_name,
         "use_keywords": classifier.use_keywords,
         "keyword_weight": classifier.keyword_weight,
         "semantic_weight": classifier.semantic_weight,
-        "rubrics_count": len(classifier.rubrics)
+        "use_onnx": classifier.use_onnx,
+        "rubrics_count": len(classifier.rubrics),
+        "cache": cache_stats
+    }
+
+
+@app.get("/model/cache", response_model=CacheStatsResponse, tags=["Model Management"])
+async def get_cache_stats():
+    """
+    Получение статистики кэша эмбеддингов.
+    
+    Кэш ускоряет обработку повторяющихся текстов.
+    """
+    if classifier is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Классификатор не загружен"
+        )
+    
+    stats = classifier.get_cache_stats()
+    return CacheStatsResponse(**stats)
+
+
+@app.delete("/model/cache", tags=["Model Management"])
+async def clear_cache():
+    """
+    Очистка кэша эмбеддингов.
+    
+    Полезно для освобождения памяти или после обновления модели.
+    """
+    if classifier is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Классификатор не загружен"
+        )
+    
+    old_stats = classifier.get_cache_stats()
+    classifier.clear_cache()
+    
+    return {
+        "status": "success",
+        "message": f"Кэш очищен. Было элементов: {old_stats['size']}"
     }
 
 
