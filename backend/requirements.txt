@@ -1,11 +1,15 @@
 # Core ML libraries
-sentence-transformers
+sentence-transformers>=2.2.0
 torch
 numpy
 scikit-learn
 pandas
 python-dotenv==1.0.0
 tqdm==4.66.1
+
+# ONNX Runtime для ускорения (2-3x быстрее)
+onnxruntime>=1.16.0
+onnx>=1.14.0
 
 # API
 fastapi==0.109.0
