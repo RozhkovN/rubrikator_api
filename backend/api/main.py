@@ -118,18 +118,14 @@ class TrainRequest(BaseModel):
         description="Название модели Sentence Transformers"
     )
     use_keywords: bool = Field(True, description="Использовать ли анализ ключевых слов")
-    keyword_weight: float = Field(0.35, description="Вес ключевых слов (0-1)", ge=0, le=1)
-    use_onnx: bool = Field(True, description="Использовать ли ONNX ускорение (2-3x быстрее)")
-    cache_size: int = Field(1000, description="Размер LRU кэша для эмбеддингов", ge=100, le=10000)
+    keyword_weight: float = Field(0.3, description="Вес ключевых слов (0-1)", ge=0, le=1)
     
     class Config:
         json_schema_extra = {
             "example": {
                 "model_name": "paraphrase-multilingual-mpnet-base-v2",
                 "use_keywords": True,
-                "keyword_weight": 0.35,
-                "use_onnx": True,
-                "cache_size": 1000
+                "keyword_weight": 0.3
             }
         }
 
@@ -305,8 +301,6 @@ async def train_model(request: TrainRequest):
     - **model_name**: Название модели Sentence Transformers
     - **use_keywords**: Использовать ли анализ ключевых слов
     - **keyword_weight**: Вес ключевых слов (0-1)
-    - **use_onnx**: Использовать ли ONNX ускорение (2-3x быстрее)
-    - **cache_size**: Размер LRU кэша для эмбеддингов
     
     Примечание: Процесс может занять несколько минут при первом запуске
     (загрузка модели из интернета).
@@ -316,18 +310,14 @@ async def train_model(request: TrainRequest):
     try:
         logger.info("🚀 Начинаем обучение модели...")
         logger.info(f"   Модель: {request.model_name}")
-        logger.info(f"   ONNX: {request.use_onnx}")
         logger.info(f"   Ключевые слова: {request.use_keywords}")
         logger.info(f"   Вес ключевых слов: {request.keyword_weight}")
-        logger.info(f"   Размер кэша: {request.cache_size}")
         
         # Создаем новый классификатор с заданными параметрами
         new_classifier = ComplaintClassifier(
             model_name=request.model_name,
             use_keywords=request.use_keywords,
-            keyword_weight=request.keyword_weight,
-            use_onnx=request.use_onnx,
-            cache_size=request.cache_size
+            keyword_weight=request.keyword_weight
         )
         
         # Путь для сохранения модели
@@ -374,41 +364,8 @@ async def get_model_info():
         "use_keywords": classifier.use_keywords,
         "keyword_weight": classifier.keyword_weight,
         "semantic_weight": classifier.semantic_weight,
-        "rubrics_count": len(classifier.rubrics),
-        "use_onnx": getattr(classifier, 'use_onnx', False)
+        "rubrics_count": len(classifier.rubrics)
     }
-
-
-@app.get("/model/cache", tags=["Model Management"])
-async def get_cache_stats():
-    """
-    Получение статистики кэша эмбеддингов.
-    
-    Возвращает размер кэша, количество попаданий и промахов.
-    """
-    if classifier is None:
-        return {
-            "error": "Модель не загружена"
-        }
-    
-    return classifier.get_cache_stats()
-
-
-@app.post("/model/cache/clear", tags=["Model Management"])
-async def clear_cache():
-    """
-    Очистка кэша эмбеддингов.
-    
-    Используйте после обновления модели или при проблемах с памятью.
-    """
-    if classifier is None:
-        raise HTTPException(
-            status_code=503,
-            detail="Модель не загружена"
-        )
-    
-    classifier.clear_cache()
-    return {"status": "ok", "message": "Кэш очищен"}
 
 
 # ===================== ЗАГРУЗКА ДОКУМЕНТОВ =====================
