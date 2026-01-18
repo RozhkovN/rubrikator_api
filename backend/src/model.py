@@ -206,11 +206,13 @@ class ComplaintClassifier:
             if self.use_onnx:
                 try:
                     # ONNX Runtime для ускорения
+                    # Используем оптимизированную модель O4 (максимальная оптимизация)
                     self.model = SentenceTransformer(
                         self.model_name,
-                        backend="onnx"
+                        backend="onnx",
+                        model_kwargs={"file_name": "onnx/model_O4.onnx"}
                     )
-                    print("✓ Модель загружена с ONNX ускорением")
+                    print("✓ Модель загружена с ONNX ускорением (O4)")
                 except Exception as e:
                     print(f"⚠️  ONNX недоступен: {e}")
                     print("   Загрузка стандартной модели...")
